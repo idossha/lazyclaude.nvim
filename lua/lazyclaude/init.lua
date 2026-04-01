@@ -79,7 +79,11 @@ function M.open(opts)
 
   local cmd = build_cmd(M.config, opts)
 
+  -- Set EDITOR to nvim so lazyclaude opens files in Neovim with user's config
+  local env = vim.tbl_extend("force", vim.fn.environ(), { EDITOR = "nvim" })
+
   vim.fn.termopen(cmd, {
+    env = env,
     on_exit = function(_, code, _)
       -- Clean up
       if lazyclaude_win and vim.api.nvim_win_is_valid(lazyclaude_win) then
