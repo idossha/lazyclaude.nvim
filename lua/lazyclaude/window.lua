@@ -1,17 +1,25 @@
 local M = {}
 
+local MIN_WIDTH = 40
+local MIN_HEIGHT = 10
+
 --- Calculate floating window position and dimensions.
 ---@param config table Plugin configuration
----@return table {width, height, row, col}
+---@return table {width: number, height: number, row: number, col: number}
 function M.get_window_pos(config)
   local factor = config.floating_window_scaling_factor
   local columns = vim.o.columns
   local lines = vim.o.lines
 
-  local width = math.ceil(columns * factor)
-  local height = math.ceil(lines * factor)
-  local col = math.ceil((columns - width) / 2)
-  local row = math.ceil((lines - height) / 2 - 1)
+  local width = math.max(MIN_WIDTH, math.floor(columns * factor))
+  local height = math.max(MIN_HEIGHT, math.floor(lines * factor))
+
+  -- Clamp to editor bounds
+  width = math.min(width, columns)
+  height = math.min(height, lines - 2) -- leave room for cmdline
+
+  local col = math.floor((columns - width) / 2)
+  local row = math.floor((lines - height) / 2 - 1)
 
   if row < 0 then
     row = 0

@@ -28,8 +28,30 @@ local defaults = {
 M.config = vim.deepcopy(defaults)
 
 -- State
-local lazyclaude_buf = nil
-local lazyclaude_win = nil
+local state = {
+  buf = nil,
+  win = nil,
+  job_id = nil,
+}
+
+--- Reset internal state to idle.
+local function reset_state()
+  state.buf = nil
+  state.win = nil
+  state.job_id = nil
+end
+
+--- Check if the lazyclaude window is currently open and valid.
+---@return boolean
+local function is_open()
+  return state.win ~= nil and vim.api.nvim_win_is_valid(state.win)
+end
+
+--- Check if the lazyclaude buffer is currently valid.
+---@return boolean
+local function buf_valid()
+  return state.buf ~= nil and vim.api.nvim_buf_is_valid(state.buf)
+end
 
 --- Build the shell command to invoke lazyclaude.
 ---@param config LazyclaudeConfig
@@ -51,6 +73,17 @@ local function build_cmd(config, opts)
   return cmd
 end
 
+--- Clean up window and buffer, then reset state.
+local function cleanup()
+  if is_open() then
+    vim.api.nvim_win_close(state.win, true)
+  end
+  if buf_valid() then
+    vim.api.nvim_buf_delete(state.buf, { force = true })
+  end
+  reset_state()
+end
+
 --- Check if lazyclaude binary is available.
 ---@return boolean
 function M.is_available()
@@ -63,38 +96,60 @@ function M.open(opts)
   opts = opts or {}
 
   if not M.is_available() then
-    vim.notify("lazyclaude: binary not found: " .. M.config.lazyclaude_cmd, vim.log.levels.ERROR)
+    vim.notify(
+      "lazyclaude: '" .. M.config.lazyclaude_cmd .. "' not found. Install it or set lazyclaude_cmd in setup().",
+      vim.log.levels.ERROR
+    )
     return
   end
 
   -- If existing window is valid, focus it
-  if lazyclaude_win and vim.api.nvim_win_is_valid(lazyclaude_win) then
-    vim.api.nvim_set_current_win(lazyclaude_win)
+  if is_open() then
+    vim.api.nvim_set_current_win(state.win)
+    vim.cmd("startinsert")
     return
   end
 
+  -- Clean up any stale state from a previous session
+  if state.buf or state.win then
+    cleanup()
+  end
+
   local buf, win = window.open_floating_window(M.config)
-  lazyclaude_buf = buf
-  lazyclaude_win = win
+  state.buf = buf
+  state.win = win
 
   local cmd = build_cmd(M.config, opts)
 
-  -- Set EDITOR to nvim so lazyclaude opens files in Neovim with user's config
-  local env = vim.tbl_extend("force", vim.fn.environ(), { EDITOR = "nvim" })
+  -- Set EDITOR=nvim so lazyclaude opens files in Neovim with user config
+  local env = { EDITOR = "nvim" }
 
-  vim.fn.termopen(cmd, {
+  local ok, job_id = pcall(vim.fn.termopen, cmd, {
     env = env,
     on_exit = function(_, code, _)
-      -- Clean up
-      if lazyclaude_win and vim.api.nvim_win_is_valid(lazyclaude_win) then
-        vim.api.nvim_win_close(lazyclaude_win, true)
-      end
-      lazyclaude_buf = nil
-      lazyclaude_win = nil
+      vim.schedule(function()
+        cleanup()
+        if M.config.on_exit then
+          M.config.on_exit(code)
+        end
+      end)
+    end,
+  })
 
-      if M.config.on_exit then
-        M.config.on_exit(code)
-      end
+  if not ok or job_id <= 0 then
+    vim.notify("lazyclaude: failed to start terminal: " .. tostring(job_id), vim.log.levels.ERROR)
+    cleanup()
+    return
+  end
+
+  state.job_id = job_id
+
+  -- Handle buffer being wiped externally (e.g. :bdelete)
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    buffer = buf,
+    once = true,
+    callback = function()
+      reset_state()
     end,
   })
 
@@ -107,27 +162,29 @@ end
 
 --- Open lazyclaude scoped to the current file's project.
 function M.open_current_project()
-  local project_dir = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":p:h")
-  -- Walk up to find a git root
-  local git_root = vim.fn.systemlist("git -C " .. vim.fn.shellescape(project_dir) .. " rev-parse --show-toplevel")[1]
-  if vim.v.shell_error == 0 and git_root and git_root ~= "" then
-    project_dir = git_root
+  local bufname = vim.api.nvim_buf_get_name(0)
+  local project_dir
+
+  if bufname ~= "" then
+    project_dir = vim.fn.fnamemodify(bufname, ":p:h")
+    local git_root =
+      vim.fn.systemlist("git -C " .. vim.fn.shellescape(project_dir) .. " rev-parse --show-toplevel")[1]
+    if vim.v.shell_error == 0 and git_root and git_root ~= "" then
+      project_dir = git_root
+    end
   end
+
   M.open({ project_dir = project_dir })
 end
 
 --- Close lazyclaude if open.
 function M.close()
-  if lazyclaude_win and vim.api.nvim_win_is_valid(lazyclaude_win) then
-    vim.api.nvim_win_close(lazyclaude_win, true)
-  end
-  lazyclaude_buf = nil
-  lazyclaude_win = nil
+  cleanup()
 end
 
 --- Toggle lazyclaude open/closed.
 function M.toggle()
-  if lazyclaude_win and vim.api.nvim_win_is_valid(lazyclaude_win) then
+  if is_open() then
     M.close()
   else
     M.open()
@@ -138,6 +195,10 @@ end
 ---@param opts? LazyclaudeConfig
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
+
+  -- Clamp scaling factor
+  M.config.floating_window_scaling_factor =
+    math.max(0.1, math.min(1.0, M.config.floating_window_scaling_factor))
 end
 
 return M

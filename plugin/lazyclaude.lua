@@ -3,6 +3,11 @@ if vim.g.loaded_lazyclaude then
 end
 vim.g.loaded_lazyclaude = true
 
+if vim.fn.has("nvim-0.9") ~= 1 then
+  vim.notify("lazyclaude.nvim requires Neovim >= 0.9", vim.log.levels.WARN)
+  return
+end
+
 vim.api.nvim_create_user_command("LazyClaude", function()
   require("lazyclaude").open()
 end, { desc = "Open lazyclaude TUI" })
