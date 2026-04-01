@@ -2,6 +2,8 @@
 
 A Neovim plugin that wraps [lazyclaude](https://github.com/idossha/lazyclaude) in a floating terminal window, similar to how [lazygit.nvim](https://github.com/kdheepak/lazygit.nvim) wraps lazygit.
 
+![lazyclaude.nvim demo](demo/lazyclaude-nvim-demo.gif)
+
 ## Requirements
 
 - Neovim >= 0.9
